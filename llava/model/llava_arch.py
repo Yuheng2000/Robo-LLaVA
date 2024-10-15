@@ -252,7 +252,6 @@ class LlavaMetaForCausalLM(ABC):
         # rank_print(modalities)
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
-
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
@@ -282,9 +281,10 @@ class LlavaMetaForCausalLM(ABC):
                 image_features = []
                 for idx, image_feat in enumerate(encoded_image_features):
                     if idx in video_idx_in_batch:
-                        image_features.append(self.get_2dPool(image_feat))    #TODO video 进行2d maxpool
+                        image_features.append(self.get_2dPool(image_feat))    # 对video图像进行2d池化,使得每一张图像729的tokens变为196
                     else:
-                        image_features.append(image_feat)
+                        # image_features.append(image_feat)
+                        image_features.append(self.get_2dPool(image_feat))  # 对多图、多patch进行2d池化,使得每一张图像729的tokens变为196
                 # image_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
                 # rank_print(f"Encoded image feats : {[x.shape for x in image_features]}")
                 # image_features = torch.split(image_features, split_sizes, dim=0)
@@ -411,7 +411,6 @@ class LlavaMetaForCausalLM(ABC):
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
             image_features = self.encode_images(images)
-
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, "tune_mm_mlp_adapter", False) and getattr(self.config, "mm_use_im_start_end", False):
             raise NotImplementedError
@@ -438,11 +437,20 @@ class LlavaMetaForCausalLM(ABC):
         input_ids = [cur_input_ids[cur_attention_mask] for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)]
         labels = [cur_labels[cur_attention_mask] for cur_labels, cur_attention_mask in zip(labels, attention_mask)]
 
+        # 在这里处理visual tokens
         new_input_embeds = []
         new_labels = []
         cur_image_idx = 0
         # rank_print("Inserting Images embedding")
         for batch_idx, cur_input_ids in enumerate(input_ids):
+            
+            # #*******************test********************
+            # idx_test = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist()
+            # for i, idx in enumerate(idx_test):
+            #     if i == 0: continue
+            #     else: cur_input_ids[idx] = 1378
+            # #*******************test********************
+            
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             # rank0_print(num_images)
             if num_images == 0:
@@ -453,11 +461,12 @@ class LlavaMetaForCausalLM(ABC):
                 new_labels.append(labels[batch_idx])
                 cur_image_idx += 1
                 continue
-
+            # 找到image token的位置
             image_token_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
             cur_input_ids_noim = []
             cur_labels = labels[batch_idx]
             cur_labels_noim = []
+            # 把文本信息根据image切分成几段
             for i in range(len(image_token_indices) - 1):
                 cur_input_ids_noim.append(cur_input_ids[image_token_indices[i] + 1 : image_token_indices[i + 1]])
                 cur_labels_noim.append(cur_labels[image_token_indices[i] + 1 : image_token_indices[i + 1]])
@@ -467,6 +476,7 @@ class LlavaMetaForCausalLM(ABC):
             cur_new_input_embeds = []
             cur_new_labels = []
 
+            # 把image token添加到text token中
             for i in range(num_images + 1):
                 cur_new_input_embeds.append(cur_input_embeds_no_im[i])
                 cur_new_labels.append(cur_labels_noim[i])
@@ -481,7 +491,6 @@ class LlavaMetaForCausalLM(ABC):
 
             cur_new_input_embeds = [x.to(self.device) for x in cur_new_input_embeds]
 
-            # import pdb; pdb.set_trace()
             cur_new_input_embeds = torch.cat(cur_new_input_embeds)
             cur_new_labels = torch.cat(cur_new_labels)
 
@@ -509,7 +518,7 @@ class LlavaMetaForCausalLM(ABC):
         position_ids = torch.zeros((batch_size, max_len), dtype=position_ids.dtype, device=position_ids.device)
         # rank0_print("Prepare pos id")
 
-        for i, (cur_new_embed, cur_new_labels) in enumerate(zip(new_input_embeds, new_labels)):
+        for i, (cur_new_embed, cur_new_labels) in enumerate(zip(new_input_embeds, new_labels)): # 进行padding
             cur_len = cur_new_embed.shape[0]
             if getattr(self.config, "tokenizer_padding_side", "right") == "left":
                 new_input_embeds_padded.append(torch.cat((torch.zeros((max_len - cur_len, cur_new_embed.shape[1]), dtype=cur_new_embed.dtype, device=cur_new_embed.device), cur_new_embed), dim=0))
@@ -523,7 +532,6 @@ class LlavaMetaForCausalLM(ABC):
                     new_labels_padded[i, :cur_len] = cur_new_labels
                     attention_mask[i, :cur_len] = True
                     position_ids[i, :cur_len] = torch.arange(0, cur_len, dtype=position_ids.dtype, device=position_ids.device)
-
         new_input_embeds = torch.stack(new_input_embeds_padded, dim=0)
         # rank0_print("tokenizer padding")
 
@@ -548,6 +556,11 @@ class LlavaMetaForCausalLM(ABC):
             position_ids[:, split_position:] += right_add
         # import pdb; pdb.set_trace()
         # rank0_print("Finish preparing")
+        # import torch.distributed as dist
+        # if dist.is_initialized():
+        #     local_rank = dist.get_rank()
+        #     with open(f"/home/jiyuheng/Robo-LLaVA/test_oom/input_shapes_gpu_{local_rank}.txt", "a") as f:
+        #         f.write(f"Batch input shape: {new_input_embeds.shape}\n")
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):

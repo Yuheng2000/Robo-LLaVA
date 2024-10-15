@@ -1,0 +1,3 @@
+Batch input shape: torch.Size([4, 662, 3584])
+Batch input shape: torch.Size([4, 3418, 3584])
+Batch input shape: torch.Size([4, 1352, 3584])

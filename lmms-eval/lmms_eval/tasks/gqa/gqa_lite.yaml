@@ -2,18 +2,19 @@ dataset_path: lmms-lab/LMMs-Eval-Lite
 dataset_name: gqa
 dataset_kwargs:
   token: True
-task: "gqa_lite"
+task: gqa
 test_split: lite
 output_type: generate_until
 doc_to_visual: !function utils.gqa_doc_to_visual
 doc_to_text: !function utils.gqa_doc_to_text
 doc_to_target: "answer"
 generation_kwargs:
-  max_new_tokens: 16
-  temperature: 0
-  top_p: 1.0
-  num_beams: 1
-  do_sample: false
+  max_new_tokens: 1024  #TODO
+  temperature: 0.2
+  top_p: 0
+  num_beams: 1 
+  do_sample: True
+
 metric_list:
   - metric: exact_match
     aggregation: mean
@@ -22,7 +23,10 @@ metric_list:
     ignore_punctuation: true
 metadata:
   - version: 0.0
-  
+
+process_results: !function utils.gqa_process_results
+# process_results: !function utils.egothink_process_results
+
 lmms_eval_specific_kwargs:
   default:
     pre_prompt: ""

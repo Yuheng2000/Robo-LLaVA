@@ -1,3 +1,6 @@
+### ---------------------------- Note --------------------------- #
+#Use only single server
+### ---------------------------- Note --------------------------- #
 # export OMP_NUM_THREADS=8
 # export NCCL_IB_DISABLE=0
 # export NCCL_IB_GID_INDEX=3
@@ -21,27 +24,19 @@ echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 CKPT_PATH=$LLM_VERSION # this could also be the previous stage checkpoint
 
-BASE_MODEL_PATH='./checkpoints/llava-onevision-qwen2-7b-ov'
+BASE_MODEL_PATH='lmms-lab/llava-onevision-qwen2-7b-ov'
 
-NUM_GPUS=1
+NUM_GPUS=8
 NNODES=1
-RANK=0
-ADDR=10.9.200.87
-PORT=9204
+MID_RUN_NAME='llava-next-interleave_single'
+LR=2e-5
 
-MID_RUN_NAME='llava-onevision-qwen2-7b-ov-robovqa-v3'
-
-#    --pretrain_mm_mlp_adapter="/share/henry/LLaVA-NeXT/checkpoints/llava-onevision-qwen2-7b-ov/mm_projector.bin" \
-
-#ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NNODES}" --node_rank="${RANK}" --master_addr="${ADDR}" --master_port="${PORT}" \
-    #CUDA_VISIBLE_DEVICES=0
-    deepspeed llava/train/train_mem.py \
-    --deepspeed scripts/zero2.json \
+deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES llava/train/train_mem.py \
     --model_name_or_path ${BASE_MODEL_PATH} \
     --version ${PROMPT_VERSION} \
-    --data_path ./ego-robo.yaml \
-    --image_folder ./onevision_data/images \
-    --video_folder /share/world_model/robovqa/videos \
+    --data_path /home/pd/LLaVa/LLaVA-NeXT/DataConfigs/jyh_oom_test.yaml \
+    --image_folder /home/dataset_zoo/M4-Instruct/ \
+    --video_folder /home/dataset_zoo/M4-Instruct-Videos/ \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower ${VISION_MODEL_VERSION} \
@@ -50,33 +45,36 @@ MID_RUN_NAME='llava-onevision-qwen2-7b-ov-robovqa-v3'
     --mm_use_im_start_end False \
     --mm_use_im_patch_token False \
     --group_by_modality_length True \
-    --image_aspect_ratio anyres_max_9 \
-    --image_grid_pinpoints  "(1x1),...,(6x6)" \
+    --image_aspect_ratio pad \
+    --image_grid_pinpoints  "\"(1x1),...,(6x6)\"" \
     --mm_patch_merge_type spatial_unpad \
     --bf16 True \
     --run_name $MID_RUN_NAME \
     --output_dir "./checkpoints/${MID_RUN_NAME}" \
-    --num_train_epochs 2 \
-    --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 4 \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
-    --save_strategy "epoch" \
+    --save_strategy "steps" \
+    --save_steps 500 \
     --save_total_limit 1 \
-    --learning_rate 1e-5 \
+    --learning_rate $LR \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \
-    --model_max_length 32768 \
+    --report_to wandb \
+    --model_max_length 4500 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
-    --report_to wandb \
     --torch_compile True \
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
-    --frames_upbound 32
-
+    --frames_upbound 16  \
+    --multi_img_num 16 \
+    --deepspeed scripts/zero2.json
+    
 # You can delete the sdpa attn_implementation if you want to use flash attn

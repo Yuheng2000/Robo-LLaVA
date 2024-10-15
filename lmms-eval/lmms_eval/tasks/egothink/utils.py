@@ -3,34 +3,173 @@ import os
 import sacrebleu
 # from sacrebleu.metrics import BLEU
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-
+import PIL
 import logging
 import sys
 import jieba
 
+import requests
+import base64
+import re
 eval_logger = logging.getLogger("lmms-eval")
-
 dir_name = os.path.dirname(os.path.abspath(__file__))
 
-# # 19 classes
-# eval_type_dict = {
-#     "Sensation": ["count","color", "scene", "poster", "attribute_recognition", "ocr", "position"],
-#     "Cognition": ["calculation", "code", "translation", "math", "cross_instance_reason", "attribute_reason"],
-#     "Knowledge": ["celebrity", "chemistry", "physics", "biology", "landmark", "artwork"]
-# }
+
+def metric_gpt4o(doc, pred_ans):
+    API_KEY = "869d966045f44db6ae0b8de02f7bf776"
+
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": API_KEY,
+    }
+    
+    eval_prompt = """
+        [Instruction]\nPlease act as an impartial judge and evaluate the quality 
+        of the response provided by an AI assistant to
+        the user question displayed below. Your evaluation should 
+        consider correctness and helpfulness. You will be given
+        a reference answer and the assistant’s answer. Begin 
+        your evaluation by comparing the assistant’s answer with the
+        reference answer. Identify and correct any mistakes. The 
+        assistant has access to an image alongwith questions but
+        you will not be given images. Therefore, please consider only 
+        how the answer is close to the reference answer. If
+        the assistant’s answer is not exactly same as or similar to 
+        the answer, then he must be wrong. Be as objective as
+        possible. Discourage uninformative answers. Also, 
+        equally treat short and long answers and focus on the correctness
+        of answers. After providing your explanation, you 
+        must rate the response with either 0, 0.5 or 1 by strictly following
+        this format: “[[rating]]”, for example: “Rating: [[0.5]]”.
+        \n\n[Question]\n{question}\n\n[The Start of Reference
+        Answer]\n{refanswer}\n[The End of Reference Answer]
+        \n\n[The Start of Assistant’s Answer]\n{answer}\n[The
+        End of Assistant’s Answer]
+    """
+    eval_texts = eval_prompt.format(question=doc["question"].strip(), refanswer=doc["answer"].strip(), answer=pred_ans)
+    payload = {
+    "messages": [
+        {
+        "role": "system",
+        "content": [
+            {
+            "type": "text",
+            "text": "You are an AI assistant that helps people find information."
+            }
+        ]
+        },
+        {
+            "role": "user", 
+            "content": eval_texts
+        }
+    ],
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "max_tokens": 800
+    }
+
+    ENDPOINT = "https://baai-emllm-eastus2.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview"
+
+    # Send request
+    try:
+        response = requests.post(ENDPOINT, headers=headers, json=payload)
+        response.raise_for_status()  # Will raise an HTTPError if the HTTP request returned an unsuccessful status code
+    except requests.RequestException as e:
+        raise SystemExit(f"Failed to make the request. Error: {e}")
+    response = response.json()
+    content = response['choices'][0]['message']['content']
+    pattern = r"Rating:\s*\[\[(\d+(\.\d+)?)\]\]"
+
+    match = re.search(pattern, content)
+
+    if match:
+        rating_value = float(match.group(1))  # 提取第一个捕获组（数值部分）
+    else:
+        rating_value = -1.0
+
+    return rating_value, content
+
+# def metric_gpt4o(doc, pred_ans):
+#     API_KEY = "869d966045f44db6ae0b8de02f7bf776"
+#     # IMAGE_PATH = "YOUR_IMAGE_PATH"
+#     # encoded_image = base64.b64encode(open(IMAGE_PATH, 'rb').read()).decode('ascii')
+#     headers = {
+#         "Content-Type": "application/json",
+#         "api-key": API_KEY,
+#     }
+#     eval_prompt = """
+#         [Instruction]\nPlease act as an impartial judge and evaluate the quality 
+#         of the response provided by an AI assistant to
+#         the user question displayed below. Your evaluation should 
+#         consider correctness and helpfulness. You will be given
+#         a reference answer and the assistant’s answer. Begin 
+#         your evaluation by comparing the assistant’s answer with the
+#         reference answer. Identify and correct any mistakes. The 
+#         assistant has access to an image alongwith questions but
+#         you will not be given images. Therefore, please consider only 
+#         how the answer is close to the reference answer. If
+#         the assistant’s answer is not exactly same as or similar to 
+#         the answer, then he must be wrong. Be as objective as
+#         possible. Discourage uninformative answers. Also, 
+#         equally treat short and long answers and focus on the correctness
+#         of answers. After providing your explanation, you 
+#         must rate the response with either 0, 0.5 or 1 by strictly following
+#         this format: “[[rating]]”, for example: “Rating: [[0.5]]”.
+#         \n\n[Question]\n{question}\n\n[The Start of Reference
+#         Answer]\n{refanswer}\n[The End of Reference Answer]
+#         \n\n[The Start of Assistant’s Answer]\n{answer}\n[The
+#         End of Assistant’s Answer]
+#     """
+#     # Payload for the request
+#     payload = {
+#     "messages": [
+#         {
+#         "role": "system",
+#         "content": [
+#             {
+#             "type": "text",
+#             "text": "You are an AI assistant that helps people find information."
+#             }
+#         ]
+#         },
+#         {
+#             "role": "user", 
+#             "content": eval_prompt.format("question"=doc["question"].strip(), "refanswer"=doc["answer"].strip(), "answer"=pred_ans)
+#         }
+#     ],
+#     "temperature": 0.7,
+#     "top_p": 0.95,
+#     "max_tokens": 800
+#     }
+
+#     ENDPOINT = "https://baai-emllm-eastus2.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview"
+
+#     # Send request
+#     try:
+#         response = requests.post(ENDPOINT, headers=headers, json=payload)
+#         response.raise_for_status()  # Will raise an HTTPError if the HTTP request returned an unsuccessful status code
+#     except requests.RequestException as e:
+#         raise SystemExit(f"Failed to make the request. Error: {e}")
+
+#     return response.json()
+
 
 def egothink_doc_to_images(doc):
-    images_path = "/home/pd/Dataset/EgoThink/parsed_test"
-    image_path = os.path.join(images_path, doc["image_name"] + ".jpg")
-    if os.path.exists(image_path):
-        image_path = image_path
-    else:
-        sys.exit(f"image {image_path} does not exist.")
-    
-    return [image_path]
 
-def egothink_doc_to_text(doc, lmms_eval_specific_kwargs=None):#这里的第二个参数是什么意思？这个原版功能是去看那个instructions吗？
-                                                              #是需要也改成for循环吗，然后answer和question要怎么处理一下
+    # import pdb
+    # pdb.set_trace()
+    image=doc['image']
+    image_list=[image]
+    return image_list
+    # doc['image'].save('new_example.png')
+    # visual_path='/home/henry/LLaVA-NeXT/new_example.png'
+    # return [visual_path]
+
+    # else :
+    #     raise ValueError("format is wrong ")
+
+def egothink_doc_to_text(doc, lmms_eval_specific_kwargs=None):
+                                                              
     if lmms_eval_specific_kwargs is None:
         lmms_eval_specific_kwargs = {}
     
@@ -39,14 +178,14 @@ def egothink_doc_to_text(doc, lmms_eval_specific_kwargs=None):#这里的第二�
     if "pre_prompt" in lmms_eval_specific_kwargs:
         pre_prompt = lmms_eval_specific_kwargs["pre_prompt"]
     if "post_prompt" in lmms_eval_specific_kwargs:
-        post_prompt = lmms_eval_specific_kwargs["post_prompt"]#这个第二个参数是啥意思？
-    question = doc["question"].strip()#这里的question是question的path吗？
-    return f"{pre_prompt}{question}{post_prompt}"#这里是返回了一些啥？为啥不是返回一个list
+        post_prompt = lmms_eval_specific_kwargs["post_prompt"]
+    question = doc["question"].strip()
+    return f"{pre_prompt}{question}{post_prompt}"
 
 
-def egothink_doc_to_target(doc):#这个doc咋搞的？怎么一下子就能找到路径
-    answer = doc["answer"].split(":")[1].replace('(',' ').replace(')',' ').strip()
-    return answer#这个是返回了path？
+def egothink_doc_to_target(doc):
+    answer = doc["answer"]
+    return answer
 
 
 
@@ -78,9 +217,12 @@ def egothink_process_results(doc, results):
     Returns:
         a dictionary with key: metric name (in this case mme score), value: metric value
     """
-    pred = results[0].replace('A:',' ').replace(':',' ').replace('(',' ').replace(')',' ').strip()
+    # import pdb
+    # pdb.set_trace()
+    pred = results[0].strip()
     pred = pred.replace('\n', "").lower()
     # parser
+    doc['question_field']='waiting_to_sure'
     if doc["question_field"] == "N/Y":
         pred_ans = parse_pred_ans_NY(pred)
     elif doc["question_field"] == "Choices":
@@ -90,7 +232,7 @@ def egothink_process_results(doc, results):
     
     #gt_ans = doc["answer"].lower()
     pred_ans = pred_ans.lower()
-    gt_ans = doc["answer"].lower().split(":")[1].replace('(',' ').replace(')',' ').strip()
+    gt_ans = doc["answer"].strip()
     # ans =  pred_ans
     # gt = gt_ans
     ans = "".join(jieba.cut(pred_ans)).strip()
@@ -104,18 +246,17 @@ def egothink_process_results(doc, results):
         max(sentence_bleu([ans[:len(gt)-lenth].split()], gt.split(), smoothing_function=SmoothingFunction().method4, weights=(0,0,1,0)) for lenth in range(-5,5)),
         max(sentence_bleu([ans[:len(gt)-lenth].split()], gt.split(), smoothing_function=SmoothingFunction().method4, weights=(0,0,0,1)) for lenth in range(-5,5)),
     ]
-
+    
+    gpt_score, _ = metric_gpt4o(doc, pred_ans)
+    # print(gpt_score)
     # score
     # score = 1 if (doc["question_field"] == "Q/A" and anls_score(prediction=pred_ans, gold_labels=[gt_ans], threshold=0.95) >= 0.4) \
     #                 or (gt_ans == pred_ans) \
             # else 0
-
-    
-
-
-
-    return {"egothink":{"video_id": doc["video_name"], "ans": ans , "gt": gt,
-                       "BLEU_1": score[0], "BLEU_2": score[1], "BLEU_3": score[2], "BLEU_4": score[3]}}
+    return {"egothink":{ "ans": ans , "gt": gt,
+                       "BLEU_1": score[0], "BLEU_2": score[1], "BLEU_3": score[2], "BLEU_4": score[3], "GPT-Score": gpt_score}}
+    # return {"egothink":{ "ans": ans , "gt": gt,
+    #                    "BLEU_1": score[0], "BLEU_2": score[1], "BLEU_3": score[2], "BLEU_4": score[3]}}
 
 def egothink_aggregate_results(results):
     """

@@ -1,7 +1,7 @@
 dataset_path: ShadeHamilton/EGO-ROBO
 task: robovqa
 dataset_kwargs:
-  token: True
+  token: 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
   # video: True  #此处指有huggingface上的dataset含video_cache
 test_split: test
 output_type: generate_until

@@ -1,5 +1,5 @@
 datasets:
-  - json_path: /share/world_model/EVA/train_data/robot_vqa_train.json
+  - json_path: /home/world_model/EVA/train_data/robot_vqa_train.json
     sampling_strategy: all #random:1000  #all
 
   # - json_path: /path/to/llava1.5_instruct_data.json

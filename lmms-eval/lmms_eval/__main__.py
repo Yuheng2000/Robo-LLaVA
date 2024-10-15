@@ -233,6 +233,8 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
 
 
 def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
+    import pdb
+    # pdb.set_trace()
     initialize_tasks(args.verbosity)
 
     if args.predict_only:

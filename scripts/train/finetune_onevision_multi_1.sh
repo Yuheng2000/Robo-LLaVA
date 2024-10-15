@@ -10,11 +10,10 @@ LLM_VERSION="Qwen/Qwen2-7B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
 VISION_MODEL_VERSION="google/siglip-so400m-patch14-384"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
-
+export WANDB_MODE=disabled #不同步到wandb，没外网
 ############### Pretrain ################
 
 PROMPT_VERSION="qwen_1_5"
-
 BASE_RUN_NAME="llava-onevision-qwen2-7b-ov"
 #"llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-mlp2x_gelu-pretrain_blip558k_plain"
 echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
@@ -24,7 +23,7 @@ CKPT_PATH=$LLM_VERSION # this could also be the previous stage checkpoint
 BASE_MODEL_PATH='/share/henry/LLaVA-NeXT/checkpoints/llava-onevision-qwen2-7b-ov'
 
 NUM_GPUS=8
-NNODES=2
+NNODES=1
 MID_RUN_NAME='llava-onevision-qwen2-7b-ov-robovqa-v3'
 HOSTNAME=$(hostname)
 

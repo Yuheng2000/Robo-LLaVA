@@ -12,12 +12,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 accelerate launch --num_processes=8 \
 -m lmms_eval \
     --model llava_onevision \
     --model_args pretrained=/home/jiyuheng/Robo-LLaVA/checkpoints/$MODEL_ARGS_NAME,conv_template=$CONV,model_name=$MODEL_NAME \
-    --tasks robovqa \
+    --tasks gqa \
     --output_path /home/jiyuheng/Robo-LLaVA/scripts/logs/ \
     --batch_size 1 \
     --log_samples \
     --log_samples_suffix llava_onevision \
-
-wait
-
-python /home/jiyuheng/Robo-LLaVA/scripts/bleu_count.py

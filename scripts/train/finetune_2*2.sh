@@ -13,9 +13,9 @@ PROMPT_VERSION="qwen_1_5"  #or "qwen_2"
 BASE_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-mlp2x_gelu-pretrain_blip558k_plain"
 
 NUM_GPUS=8
-NNODES=8
+NNODES=1
 LR=1e-5
-BS=4
+BS=2
 ACC_STEP=2
 
 CURRENT_TIME=$(date +"%Y%m%d_%H%M%S")
@@ -32,16 +32,16 @@ echo "日志文件: $LOG_FILE"
 # LLM_PATH='/home/henry/mllm_checkpoints/Qwen2-7B-Instruct'
 #ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NNODES}" --node_rank="${RANK}" --master_addr="${ADDR}" --master_port="${PORT}" \
     #CUDA_VISIBLE_DEVICES=0 
-    deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES --hostfile hostfile_8 llava/train/train_mem.py \
-    --model_name_or_path '/home/huggingface/hub/models--Qwen--Qwen2-7B-Instruct/snapshots/f2826a00ceef68f0f2b946d945ecc0477ce4450c'  \
+    deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES --hostfile hostfile_$NNODES llava/train/train_mem.py \
+    --model_name_or_path $LLM_VERSION  \
     --version ${PROMPT_VERSION} \
     --data_path ./data_config/instruct_FT.yaml\
     --image_folder ../../lmz/data/llava-v1.5-instruct \
     --video_folder ../../world_model/robovqa/videos \
-    --pretrain_mm_mlp_adapter="/home/henry/LLaVA-NeXT/checkpoints/projectors/llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-7B-Instruct-mlp2x_gelu-pretrain_blip558k_plain/mm_projector.bin" \
+    --pretrain_mm_mlp_adapter="checkpoints/projectors/llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-mlp2x_gelu-pretrain_blip558k_plain/mm_projector.bin" \
     --mm_tunable_parts="mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
-    --vision_tower '/home/huggingface/hub/models--google--siglip-so400m-patch14-384/snapshots/7067f6db2baa594bab7c6d965fe488c7ac62f1c8' \
+    --vision_tower $VISION_MODEL_VERSION \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \

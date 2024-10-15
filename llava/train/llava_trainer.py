@@ -284,6 +284,7 @@ class LLaVATrainer(Trainer):
                 lengths=lengths,
             )
         elif self.args.group_by_modality_length:
+            # import pdb; pdb.set_trace()
             lengths = self.train_dataset.modality_lengths
             return LengthGroupedSampler(
                 # self.args.train_batch_size * self.args.gradient_accumulation_steps, # TODO: seems that we should not have gradient_accumulation_steps

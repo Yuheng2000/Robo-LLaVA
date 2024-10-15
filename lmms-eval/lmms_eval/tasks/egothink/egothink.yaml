@@ -1,5 +1,6 @@
-dataset_path: ShadeHamilton/EGO-ROBO
+dataset_path: xuexinda/EGO-dataset
 task: egothink
+# dataset_name: Planning_navigation
 dataset_kwargs:
   token: True
   # video: True  #此处指有huggingface上的dataset含video_cache
@@ -13,7 +14,7 @@ doc_to_target: !function utils.egothink_doc_to_target #"answer"
 
 
 #TODO The return value of process_results will be used by metrics
-process_results: !function utils.robovqa_process_results
+process_results: !function utils.egothink_process_results
 
 lmms_eval_specific_kwargs:
   default:
@@ -32,16 +33,16 @@ generation_kwargs:
 #TODO 参考refcoco
 metric_list:
   - metric: BLEU-1
-    aggregation: !function utils.robovqa_aggregate_res_bleu_1
+    aggregation: !function utils.egothink_aggregate_res_bleu_1
     higher_is_better: true
   - metric: BLEU-2
-    aggregation: !function utils.robovqa_aggregate_res_bleu_2
+    aggregation: !function utils.egothink_aggregate_res_bleu_2
     higher_is_better: true
   - metric: BLEU-3
-    aggregation: !function utils.robovqa_aggregate_res_bleu_3
+    aggregation: !function utils.egothink_aggregate_res_bleu_3
     higher_is_better: true
   - metric: BLEU-4  
-    aggregation: !function utils.robovqa_aggregate_res_bleu_4
+    aggregation: !function utils.egothink_aggregate_res_bleu_4
     higher_is_better: true
   
 
