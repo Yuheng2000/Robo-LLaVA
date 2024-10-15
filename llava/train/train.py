@@ -137,7 +137,7 @@ class DataArguments:
     add_time_instruction: Optional[bool] = field(default=False)  #TODO 此处在instruction里面增加时间信息，比如video last  xxs, 具体在 frame xxx-xxx, 时间戳xxxxx
     force_sample: Optional[bool] = field(default=True)   #TODO  此处强制采样 frames_upbound 数量的 frames
     
-    multi_img_num: Optional[int] = field(default=24)   #强制load多图数据等间隔采样, 最多支持multi_img_num个图片，防止load数据OOM
+    multi_img_num: Optional[int] = field(default=16)   #强制load多图数据等间隔采样, 最多支持multi_img_num个图片，防止load数据OOM
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
