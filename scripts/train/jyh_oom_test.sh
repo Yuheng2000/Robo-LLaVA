@@ -66,14 +66,14 @@ deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES llava/train/train_mem.py \
     --logging_steps 1 \
     --tf32 True \
     --report_to wandb \
-    --model_max_length 4500 \
+    --model_max_length 4096 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
     --torch_compile True \
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
-    --frames_upbound 16  \
+    --frames_upbound 10  \
     --multi_img_num 16 \
     --deepspeed scripts/zero2.json
     
