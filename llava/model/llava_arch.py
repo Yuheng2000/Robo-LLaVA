@@ -287,7 +287,7 @@ class LlavaMetaForCausalLM(ABC):
                 if idx in video_idx_in_batch:
                     image_features.append(self.get_2dPool(image_feat))    # 对video图像进行2d池化,使得每一张图像729的tokens变为196
                 else:
-                    image_features.append(self.get_2dPool(image_feat))  # 对多图、多patch进行2d池化,使得每一张图像729的tokens变为196
+                    image_features.append(image_feat)  # TODO 对多图、多patch进行2d池化，token压缩,使得每一张图像729的tokens变为196，在此修改会导致在anyres设置下报错
             # image_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
             # rank_print(f"Encoded image feats : {[x.shape for x in image_features]}")
             # image_features = torch.split(image_features, split_sizes, dim=0)
