@@ -184,6 +184,16 @@ class TrainingArguments(transformers.TrainingArguments):
 #     output_path: Optional[str] = field(default="./logs/")
 
 
+def update_data_args(data_args, model):
+    vision_tower = model.get_vision_tower()
+    data_args.def_conv_ver = model.config.def_conv_ver
+    if vision_tower is not None:
+        data_args.image_processor = vision_tower.image_processor
+        for key in vars(data_args):
+            if hasattr(model.config, key) and getattr(model.config, key, None) is not None:
+                setattr(data_args, key, getattr(model.config, key, None))
+    return data_args
+
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
