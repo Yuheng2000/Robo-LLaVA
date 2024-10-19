@@ -47,6 +47,9 @@ from llava.model import *
 from llava.mm_utils import process_highres_image, process_anyres_image, process_highres_image_crop_split, tokenizer_image_token
 from llava.utils import rank0_print, process_video_with_pyav, process_video_with_decord
 
+os.environ["WANDB_API_KEY"] = "a1f257899abf496f94af6e79163a249bdeb71012" # from jiyuheng
+os.environ["WANDB_MODE"] = "offline"
+
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -131,8 +134,9 @@ class DataArguments:
     video_fps: Optional[int] = field(default=1)
     frames_upbound: Optional[int] = field(default=0)
     add_time_instruction: Optional[bool] = field(default=False)
-    force_sample: Optional[bool] = field(default=False)
+    force_sample: Optional[bool] = field(default=True)
 
+    multi_img_num: Optional[int] = field(default=16)   #强制load多图数据等间隔采样, 最多支持multi_img_num个图片，防止load数据OOM, from jiyuheng
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -375,10 +379,42 @@ def _add_speaker_and_signal(header, source, get_conversation=True):
     return conversation
 
 
+def sample_and_replace(text, n, img_token):
+    """等间隔采样img,避免load sample中img过多OOM. from jiyuheng
+    """
+    # find img position
+    matches = [match.start() for match in re.finditer(img_token, text)]
+    
+    if len(matches) <= n:
+        return text
+    
+    step = len(matches) // n
+    sampled_indices = set(matches[i * step] for i in range(n))
+    
+    result = []
+    last_end = 0
+    
+    for start in matches:
+        end = start + len(img_token)
+        if start in sampled_indices:
+            result.append(text[last_end:end])
+            last_end = end
+        else:
+            # 跳过img_token并删除前面的空格
+            result.append(text[last_end:start].rstrip())
+            last_end = end
+    result.append(text[last_end:])
+    
+    return ''.join(result)
+
+
 def preprocess_multimodal(sources: Sequence[str], data_args: DataArguments) -> Dict:
     is_multimodal = data_args.is_multimodal
     if not is_multimodal:
         return sources
+    
+    # aviod OOM. from jiyuheng
+    multi_img_num = data_args.multi_img_num
 
     for source in sources:
         for sentence in source:
@@ -386,6 +422,8 @@ def preprocess_multimodal(sources: Sequence[str], data_args: DataArguments) -> D
             # if DEFAULT_IMAGE_TOKEN in sentence["value"] and not sentence["value"].startswith(DEFAULT_IMAGE_TOKEN):
             # only check for num_im=1
             num_im = len(re.findall(DEFAULT_IMAGE_TOKEN, sentence["value"]))
+            if num_im > multi_img_num:
+                sentence = sample_and_replace(sentence, num_im, DEFAULT_IMAGE_TOKEN)
             if num_im == 1 and DEFAULT_IMAGE_TOKEN in sentence["value"] and not sentence["value"].startswith(DEFAULT_IMAGE_TOKEN):
                 sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "").strip()
                 sentence["value"] = DEFAULT_IMAGE_TOKEN + "\n" + sentence["value"]
@@ -1140,12 +1178,20 @@ class LazySupervisedDataset(Dataset):
         if "image" in sources[0]:
             image_file = self.list_data_dict[i]["image"]
             if type(image_file) is list:
-                image = [self.process_image(f) for f in image_file]
-                # Handling multi images
-                # overwrite to process with simple pad 
-                if len(image_file) > 1:
-                    image = [self.process_image(f, "pad") for f in image_file]
+                if len(image_file) > self.data_args.multi_img_num: # 针对多图数据进行pad，不执行anyres，如果超过load上限，则等间隔采样
+                    step = len(image_file) / self.data_args.multi_img_num
+                    sample_list = [image_file[int(i * step)] for i in range(self.data_args.multi_img_num)]
+                    
+                    image = [self.process_image(f, "pad") for f in sample_list]
                     image = [[im[0], im[1], "image"] for im in image]
+                elif len(image_file) > 1:
+                    image = [self.process_image(f, "pad") for f in image_file] # 多图数据，pad，不执行anyres
+                    image = [[im[0], im[1], "image"] for im in image]
+                elif len(image_file) == 1:
+                    image = [self.process_image(f) for f in image_file] # 单图数据, 默认根据sh中的image_aspect_ratio处理, 例如anyres
+                    image = [[im[0], im[1], "image"] for im in image]
+                else:
+                    print("Sample {} not exist image file list!".format(self.list_data_dict[i]))
             else:
                 image = [self.process_image(image_file)]
             sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
@@ -1159,7 +1205,7 @@ class LazySupervisedDataset(Dataset):
                 print("File {} not exist!".format(video_file))
 
             try:
-                if "shareVideoGPTV" in video_file:
+                if "shareVideoGPTV" in video_file or ("M4-Instruct-Videos" in video_file and suffix not in ['mp4',]):
                     frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
                     frame_files.sort()  # Ensure the frames are sorted if they are named sequentially
 
