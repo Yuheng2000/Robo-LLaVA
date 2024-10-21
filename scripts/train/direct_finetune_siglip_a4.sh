@@ -63,5 +63,6 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
     --attn_implementation sdpa
+    --include localhost:2
 
 # You can delete the sdpa attn_implementation if you want to use flash attn

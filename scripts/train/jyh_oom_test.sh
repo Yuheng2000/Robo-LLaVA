@@ -12,16 +12,20 @@ echo "PREV_STAGE_CHECKPOINT: ${PREV_STAGE_CHECKPOINT}"
 echo "MID_RUN_NAME: ${RUN_NAME}"
 
 
-NUM_GPUS=8
+NUM_GPUS=1
 NNODES=1
 LR=1e-5
 
-deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES llava/train/train_mem.py \
+# --image_folder /home/dataset_zoo/M4-Instruct/ \
+# --video_folder /home/dataset_zoo/M4-Instruct-Videos/ \
+
+# deepspeed  --num_gpus $NUM_GPUS --num_nodes $NNODES llava/train/train_mem.py \
+deepspeed  --include localhost:1 llava/train/train_mem.py \
     --model_name_or_path ${PREV_STAGE_CHECKPOINT} \
     --version ${PROMPT_VERSION} \
     --data_path /home/pd/LLaVa/LLaVA-NeXT/DataConfigs/jyh_oom_test.yaml \
-    --image_folder /home/dataset_zoo/M4-Instruct/ \
-    --video_folder /home/dataset_zoo/M4-Instruct-Videos/ \
+    --image_folder /home/jiyuheng/ \
+    --video_folder /home/jiyuheng/ \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower ${VISION_MODEL_VERSION} \
