@@ -1,11 +1,11 @@
 ############### Finetune ################
 
-export BASE_RUN_NAME=Llava-Onevision-baseline-qwen2.5
+export BASE_RUN_NAME=Llava-Onevision-baseline-qwen2
 
-export LLM_VERSION=/home/vlm/pretrain_model/Qwen2.5-7B-Instruct
+export LLM_VERSION=/home/vlm/pretrain_model/Qwen2-7B-Instruct
 export VISION_MODEL_VERSION=/home/vlm/pretrain_model/siglip-so400m-patch14-384
 
-export MM_PROJECTOR=mm-projection_Qwen2.5-7B-Instruct_siglip-so400m-patch14-384
+export MM_PROJECTOR=mm-projection_Qwen2-7B-Instruct_siglip-so400m-patch14-384
 export PRETRAIN_MM_MLP_ADAPTER=/home/vlm/workspace/checkpoints/projectors/${MM_PROJECTOR}/mm_projector.bin
 
 export DATA_PATH=/home/vlm/finetune_json/yaml/llava1008k_robovqa800k.yaml
@@ -16,23 +16,24 @@ export OUTPUT_DIR=/home/vlm/workspace/checkpoints/${BASE_RUN_NAME}
 export PROMPT_VERSION=qwen_2
 
 export IMAGE_ASPECT_RATIO=anyres
-export MM_TUNABLE_PARTS="mm_vision_tower,mm_mlp_adapter,mm_language_model"
+export MM_TUNABLE_PARTS="mm_mlp_adapter,mm_language_model"
 export IMAGE_GRID_PINPOINTS="[(384, 768), (768, 384), (768, 768), (1152, 384), (384, 1152)]"
 
 export NUM_GPUS=8
-export NNODES=1
+export NNODES=4
+export HOSTFILE=/home/vlm/workspace/hostfile/hostfile_group2_4
 
 export DATA_WORKERS=4
 export DEV_BATCHSIZE=4
-export GRAD_ACC_STEPS=4
+export GRAD_ACC_STEPS=2
 
-export LEARNING_RATE=1e-5
+export LEARNING_RATE=2e-5
 export VIT_LEARNING_RATE=2e-6
 export MAX_SEQ_LEN=4096
 export MAX_IMAGE_NUM=16
 export ZERO_VERSION=3
 
-deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES \
+deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES --hostfile $HOSTFILE \
     llava/train/train_mem.py \
     --deepspeed scripts/zero${ZERO_VERSION}.json \
     --model_name_or_path $LLM_VERSION \
@@ -79,6 +80,6 @@ deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES \
     --attn_implementation sdpa \
     --frames_upbound $MAX_IMAGE_NUM  \
     --multi_img_num $MAX_IMAGE_NUM \
-    2>&1 | tee -a $OUTPUT_DIR/train.log
+    2>&1 | tee $OUTPUT_DIR/train.log
 
 # You can delete the sdpa attn_implementation if you want to use flash attn
