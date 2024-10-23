@@ -1,6 +1,6 @@
 ############### Finetune ################
 
-export BASE_RUN_NAME=Llava-Onevision-baseline-qwen2
+export BASE_RUN_NAME=direct_finetune_Llava-Onevision-baseline-qwen2
 
 export LLM_VERSION=/home/vlm/pretrain_model/Qwen2-7B-Instruct
 export VISION_MODEL_VERSION=/home/vlm/pretrain_model/siglip-so400m-patch14-384
@@ -33,6 +33,10 @@ export MAX_SEQ_LEN=4096
 export MAX_IMAGE_NUM=16
 export ZERO_VERSION=3
 
+if [ ! -d "$OUTPUT_DIR" ]; then
+  mkdir "$OUTPUT_DIR"
+fi
+
 deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES --hostfile $HOSTFILE \
     llava/train/train_mem.py \
     --deepspeed scripts/zero${ZERO_VERSION}.json \
@@ -51,7 +55,7 @@ deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES --hostfile $HOSTFILE \
     --mm_use_im_patch_token False \
     --group_by_modality_length True \
     --image_aspect_ratio $IMAGE_ASPECT_RATIO \
-    --image_grid_pinpoints $IMAGE_GRID_PINPOINTS \
+    --image_grid_pinpoints "$IMAGE_GRID_PINPOINTS" \
     --bf16 True \
     --run_name $BASE_RUN_NAME \
     --output_dir $OUTPUT_DIR \
