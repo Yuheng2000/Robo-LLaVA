@@ -1214,7 +1214,7 @@ class LazySupervisedDataset(Dataset):
                 print("File {} not exist!".format(video_file))
 
             try:
-                if "shareVideoGPTV" in video_file or ("jiyuheng" in video_file and suffix not in ['mp4',]):
+                if "shareVideoGPTV" in video_file or ("M4-Instruct-Videos" in video_file and suffix not in ['mp4',]):
                     frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
                     frame_files.sort()  # Ensure the frames are sorted if they are named sequentially
 
