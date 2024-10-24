@@ -42,8 +42,8 @@ deepspeed --num_gpus $NUM_GPUS --num_nodes $NNODES --hostfile $HOSTFILE \
     --data_path $DATA_PATH \
     --image_folder $IMAGE_FOLDER \
     --video_folder $VIDEO_FOLDER \
-    --mm_tunable_parts $MM_TUNABLE_PARTS \
-    --mm_vision_tower_lr $VIT_LEARNING_RATE \
+    --mm_tunable_parts=$MM_TUNABLE_PARTS \
+    --mm_vision_tower_lr=$VIT_LEARNING_RATE \
     --vision_tower $VISION_MODEL_VERSION \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \

@@ -148,7 +148,6 @@ def select_best_resolution(original_size, possible_resolutions):
 
     return best_fit
 
-
 def resize_and_pad_image(image, target_resolution):
     """
     Resize and pad an image to a target resolution while maintaining aspect ratio.
@@ -163,30 +162,88 @@ def resize_and_pad_image(image, target_resolution):
     original_width, original_height = image.size
     target_width, target_height = target_resolution
 
-    # Determine which dimension (width or height) to fill
     scale_w = target_width / original_width
     scale_h = target_height / original_height
 
     if scale_w < scale_h:
-        # Width will be filled completely
         new_width = target_width
         new_height = min(math.ceil(original_height * scale_w), target_height)
     else:
-        # Height will be filled completely
         new_height = target_height
         new_width = min(math.ceil(original_width * scale_h), target_width)
 
     # Resize the image
-    resized_image = image.resize((new_width, new_height))
+    new_size = torch.LongTensor([new_width, new_height])
+    resized_image = image.resize(new_size.tolist())
 
-    # Create a new image with the target size and paste the resized image onto it
-    new_image = Image.new("RGB", (target_width, target_height), (0, 0, 0))
+    new_image = Image.new('RGB', (target_width, target_height), (0, 0, 0))
     paste_x = (target_width - new_width) // 2
     paste_y = (target_height - new_height) // 2
     new_image.paste(resized_image, (paste_x, paste_y))
 
-    return new_image
+    origin_beg = torch.LongTensor([paste_x, paste_y])
+    origin_box = torch.stack([origin_beg, origin_beg + new_size])
+    return new_image, origin_box
 
+# def resize_and_pad_image(image, target_resolution):
+#     """
+#     Resize and pad an image to a target resolution while maintaining aspect ratio.
+
+#     Args:
+#         image (PIL.Image.Image): The input image.
+#         target_resolution (tuple): The target resolution (width, height) of the image.
+
+#     Returns:
+#         PIL.Image.Image: The resized and padded image.
+#     """
+#     original_width, original_height = image.size
+#     target_width, target_height = target_resolution
+
+#     # Determine which dimension (width or height) to fill
+#     scale_w = target_width / original_width
+#     scale_h = target_height / original_height
+
+#     if scale_w < scale_h:
+#         # Width will be filled completely
+#         new_width = target_width
+#         new_height = min(math.ceil(original_height * scale_w), target_height)
+#     else:
+#         # Height will be filled completely
+#         new_height = target_height
+#         new_width = min(math.ceil(original_width * scale_h), target_width)
+
+#     # Resize the image
+#     resized_image = image.resize((new_width, new_height))
+
+#     # Create a new image with the target size and paste the resized image onto it
+#     new_image = Image.new("RGB", (target_width, target_height), (0, 0, 0))
+#     paste_x = (target_width - new_width) // 2
+#     paste_y = (target_height - new_height) // 2
+#     new_image.paste(resized_image, (paste_x, paste_y))
+
+#     return new_image
+
+
+# def divide_to_patches(image, patch_size):
+#     """
+#     Divides an image into patches of a specified size.
+
+#     Args:
+#         image (PIL.Image.Image): The input image.
+#         patch_size (int): The size of each patch.
+
+#     Returns:
+#         list: A list of PIL.Image.Image objects representing the patches.
+#     """
+#     patches = []
+#     width, height = image.size
+#     for i in range(0, height, patch_size):
+#         for j in range(0, width, patch_size):
+#             box = (j, i, j + patch_size, i + patch_size)
+#             patch = image.crop(box)
+#             patches.append(patch)
+
+#     return patches
 
 def divide_to_patches(image, patch_size):
     """
@@ -200,16 +257,15 @@ def divide_to_patches(image, patch_size):
         list: A list of PIL.Image.Image objects representing the patches.
     """
     patches = []
-    width, height = image.size
-    for i in range(0, height, patch_size):
-        for j in range(0, width, patch_size):
-            box = (j, i, j + patch_size, i + patch_size)
-            patch = image.crop(box)
-            patches.append(patch)
-
+    img_wh = torch.LongTensor(image.size)
+    for i in range(0, img_wh[1], patch_size):
+        for j in range(0, img_wh[0], patch_size):
+            pbox = torch.LongTensor([[j, i], [j + patch_size, i + patch_size]])
+            patch = image.crop(pbox.view(-1).tolist())
+            patches.append((patch, pbox / img_wh))
     return patches
 
-
+    ß
 def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     """
     Calculate the shape of the image patch grid after the preprocessing for images of any resolution.
@@ -239,8 +295,92 @@ def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     width, height = select_best_resolution(image_size, possible_resolutions)
     return width // patch_size, height // patch_size
 
+def select_best_resolution(original_size, possible_resolutions):
+    """
+    Selects the best resolution from a list of possible resolutions based on the original size.
 
-def process_anyres_image(image, processor, grid_pinpoints):
+    Args:
+        original_size (tuple): The original size of the image in the format (width, height).
+        possible_resolutions (list): A list of possible resolutions in the format [(width1, height1), (width2, height2), ...].
+
+    Returns:
+        tuple: The best fit resolution in the format (width, height).
+    """
+    original_width, original_height = original_size
+    best_fit = None
+    max_effective_resolution = 0
+    min_wasted_resolution = float('inf')
+
+    for width, height in possible_resolutions:
+        scale = min(width / original_width, height / original_height)
+        downscaled_width, downscaled_height = int(original_width * scale), int(original_height * scale)
+        effective_resolution = min(downscaled_width * downscaled_height, original_width * original_height)
+        wasted_resolution = (width * height) - effective_resolution
+
+        if effective_resolution > max_effective_resolution or (effective_resolution == max_effective_resolution and wasted_resolution < min_wasted_resolution):
+            max_effective_resolution = effective_resolution
+            min_wasted_resolution = wasted_resolution
+            best_fit = (width, height)
+
+    return best_fit
+
+def select_best_resolution_optimized(img_size, possible_resolutions, patch_size=(336, 336), sbr_coeffs=None):
+    grid_sizes = [(width // patch_size[0], height // patch_size[1]) for width, height in possible_resolutions]
+    grid_stats = []
+    img_asp_ratio = img_size[0] / img_size[1] # w / h
+    for grid_size in grid_sizes:
+        grids_asp_ratio = grid_size[0] / grid_size[1] # w / h
+        if img_asp_ratio > grids_asp_ratio:
+            dst_size = (grid_size[0] * patch_size[0], int(grid_size[0] * patch_size[0] / img_asp_ratio))
+        else:
+            dst_size = (int(grid_size[1] * patch_size[1] * img_asp_ratio), grid_size[1] * patch_size[1])
+        patches_area = grid_size[0] * grid_size[1] * patch_size[0] * patch_size[1]
+        pix_area = dst_size[0] * dst_size[1]
+        pad_area = patches_area - pix_area
+        asp_ratio_diff = abs(math.log(img_asp_ratio / grids_asp_ratio))
+        size_diff = abs(patches_area - img_size[0] * img_size[1])
+        grid_stats.append((grid_size, pix_area, pad_area, asp_ratio_diff, size_diff))
+
+    def norm(vec):
+        vmin, vmax = min(vec), max(vec)
+        if abs(vmax - vmin) < 1e-6:
+            return [0.0] * len(vec)
+        return [(x - vmin) / (vmax - vmin) for x in vec]
+
+    if sbr_coeffs is None or len(sbr_coeffs) != 4:
+        sbr_coeffs = (0.8, 0.4, 0.2, 0.1)
+    norm_pix_area = norm([x[1] for x in grid_stats])
+    norm_pix_area = [x * sbr_coeffs[0] for x in norm_pix_area]
+
+    norm_pad_area = norm([x[2] for x in grid_stats])
+    norm_pad_area = [(1 - x) * sbr_coeffs[1] for x in norm_pad_area]
+
+    norm_ratio_diff = norm([x[3] for x in grid_stats])
+    norm_ratio_diff = [(1 - x) * sbr_coeffs[2] for x in norm_ratio_diff]
+
+    norm_size_diff = norm([x[4] for x in grid_stats])
+    norm_size_diff = [(1 - x) * sbr_coeffs[3] for x in norm_size_diff]
+
+    grid_sizes = [x[0] for x in grid_stats]
+    grid_weight = [sum(x) for x in zip(norm_pix_area, norm_pad_area, norm_ratio_diff, norm_size_diff)]
+    grid_stats = list(zip(grid_sizes, grid_weight))
+    grid_stats.sort(key=lambda x: x[1], reverse=True)
+
+    best_size = grid_stats[0][0]
+    best_resolution = (best_size[0] * patch_size[0], best_size[1] * patch_size[1])
+    return best_resolution
+
+def get_patch_algo_config(possible_resolutions):
+    resl_fit_algos = ['legacy', 'optimized']
+    config = {
+        'resolution_fit_algorithm': resl_fit_algos[0],
+    }
+    if possible_resolutions[-1][0] <= 0 or possible_resolutions[-1][1] <= 0:
+        config_vals = possible_resolutions.pop(-1)
+        config['resolution_fit_algorithm'] = resl_fit_algos[-config_vals[0]]
+    return config, possible_resolutions
+
+def process_anyres_image(image: Image, processor, grid_pinpoints, sbr_coeffs=None):
     """
     Process an image with variable resolutions.
 
@@ -252,45 +392,86 @@ def process_anyres_image(image, processor, grid_pinpoints):
     Returns:
         torch.Tensor: A tensor containing the processed image patches.
     """
-    # Convert grid_pinpoints from string to list
-    if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
-        try:
-            patch_size = processor.size[0]
-        except Exception as e:
-            patch_size = processor.size["shortest_edge"]
-        assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
-        # Use regex to extract the range from the input string
-        matches = re.findall(r"\((\d+)x(\d+)\)", grid_pinpoints)
-        range_start = tuple(map(int, matches[0]))
-        range_end = tuple(map(int, matches[-1]))
-        # Generate a matrix of tuples from (range_start[0], range_start[1]) to (range_end[0], range_end[1])
-        grid_pinpoints = [(i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)]
-        # Multiply all elements by patch_size
-        grid_pinpoints = [[dim * patch_size for dim in pair] for pair in grid_pinpoints]
-
     if type(grid_pinpoints) is list:
         possible_resolutions = grid_pinpoints
     else:
         possible_resolutions = ast.literal_eval(grid_pinpoints)
-    best_resolution = select_best_resolution(image.size, possible_resolutions)
-    image_padded = resize_and_pad_image(image, best_resolution)
+    algo_conf, possible_resolutions = get_patch_algo_config(possible_resolutions)
 
-    patches = divide_to_patches(image_padded, processor.crop_size["height"])
+    if algo_conf['resolution_fit_algorithm'] == 'legacy':
+        best_resolution = select_best_resolution(image.size, possible_resolutions)
+    elif algo_conf['resolution_fit_algorithm'] == 'optimized':
+        best_resolution = select_best_resolution_optimized(image.size, possible_resolutions, sbr_coeffs=sbr_coeffs)
+    image_padded, origin_box = resize_and_pad_image(image, best_resolution)
 
-    # FIXME: this seems to be a bug that it resizes instead of pad.
-    # but to keep it consistent with previous, i will keep it as it is
-    # TODO: uncomment below to ablate with the padding
-    if isinstance(processor.size, dict):
-        shortest_edge = processor.size["shortest_edge"]
-    else:
-        shortest_edge = min(processor.size)
-    image_original_resize = image.resize((shortest_edge, shortest_edge))
-    # image_padded_square = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-    # image_original_resize = image_padded_square.resize((processor.size['shortest_edge'], processor.size['shortest_edge']))
+    patches = divide_to_patches(image_padded, processor.crop_size['height'])
+    # patches: list of tuples (patch, pbox)
+    try:
+        main_patch_dst_size = (processor.size['shortest_edge'], processor.size['shortest_edge'])
+    except:
+        main_patch_dst_size = (processor.size[0], processor.size[0])
+    main_patch = image.resize(main_patch_dst_size, Image.LANCZOS)
+    # print(len(patches), patches)
+    image_patches = [main_patch] + [patch[0] for patch in patches]
+    image_patches = [processor.preprocess(p, return_tensors='pt')['pixel_values'][0] for p in image_patches]
 
-    image_patches = [image_original_resize] + patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
-    return torch.stack(image_patches, dim=0)
+    padded_size = torch.LongTensor(image_padded.size)
+    pboxes = [origin_box / padded_size] + [patch[1] for patch in patches] # list of tensors[2, 2]
+    pboxes = torch.stack([pbox.flatten() for pbox in pboxes]) # tensor[n, 4]
+    return torch.stack(image_patches, dim=0), pboxes
+
+
+# def process_anyres_image(image, processor, grid_pinpoints):
+#     """
+#     Process an image with variable resolutions.
+
+#     Args:
+#         image (PIL.Image.Image): The input image to be processed.
+#         processor: The image processor object.
+#         grid_pinpoints (str): A string representation of a list of possible resolutions.
+
+#     Returns:
+#         torch.Tensor: A tensor containing the processed image patches.
+#     """
+#     # Convert grid_pinpoints from string to list
+#     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
+#         try:
+#             patch_size = processor.size[0]
+#         except Exception as e:
+#             patch_size = processor.size["shortest_edge"]
+#         assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
+#         # Use regex to extract the range from the input string
+#         matches = re.findall(r"\((\d+)x(\d+)\)", grid_pinpoints)
+#         range_start = tuple(map(int, matches[0]))
+#         range_end = tuple(map(int, matches[-1]))
+#         # Generate a matrix of tuples from (range_start[0], range_start[1]) to (range_end[0], range_end[1])
+#         grid_pinpoints = [(i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)]
+#         # Multiply all elements by patch_size
+#         grid_pinpoints = [[dim * patch_size for dim in pair] for pair in grid_pinpoints]
+
+#     if type(grid_pinpoints) is list:
+#         possible_resolutions = grid_pinpoints
+#     else:
+#         possible_resolutions = ast.literal_eval(grid_pinpoints)
+#     best_resolution = select_best_resolution(image.size, possible_resolutions)
+#     image_padded = resize_and_pad_image(image, best_resolution)
+
+#     patches = divide_to_patches(image_padded, processor.crop_size["height"])
+
+#     # FIXME: this seems to be a bug that it resizes instead of pad.
+#     # but to keep it consistent with previous, i will keep it as it is
+#     # TODO: uncomment below to ablate with the padding
+#     if isinstance(processor.size, dict):
+#         shortest_edge = processor.size["shortest_edge"]
+#     else:
+#         shortest_edge = min(processor.size)
+#     image_original_resize = image.resize((shortest_edge, shortest_edge))
+#     # image_padded_square = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+#     # image_original_resize = image_padded_square.resize((processor.size['shortest_edge'], processor.size['shortest_edge']))
+
+#     image_patches = [image_original_resize] + patches
+#     image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+#     return torch.stack(image_patches, dim=0)
 
 
 def load_image_from_base64(image):

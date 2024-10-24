@@ -117,15 +117,15 @@ class BenchmarkDataset(train.LazySupervisedDataset):
         elif 'image' in source:
             num_imgs = 1
 
-        if self.data_args.image_prefix == 'origin':
-            if source['conversations'][0]['value'].count('<image>') == 0:
-                source['conversations'][0]['value'] = "<image>\n" * num_imgs + \
-                    source['conversations'][0]['value']
-        else:
-            source['conversations'][0]['value'] = self._remove_image_tags(
-                source['conversations'][0]['value'], num_imgs)
-            assert '<image>' not in source['conversations'][0]['value'], \
-                f"Found <image> in source:\n{source['conversations'][0]['value']}"
+        # if self.data_args.image_prefix == 'origin':
+        #     if source['conversations'][0]['value'].count('<image>') == 0:
+        #         source['conversations'][0]['value'] = "<image>\n" * num_imgs + \
+        #             source['conversations'][0]['value']
+        # else:
+        #     source['conversations'][0]['value'] = self._remove_image_tags(
+        #         source['conversations'][0]['value'], num_imgs)
+        #     assert '<image>' not in source['conversations'][0]['value'], \
+        #         f"Found <image> in source:\n{source['conversations'][0]['value']}"
 
         item = self._item_from_source(source)
         item['index'] = i

@@ -451,6 +451,16 @@ You are a helpful assistant.""",
     sep="<|im_end|>",
 )
 
+conv_qwen_2 = Conversation(
+    system="<|im_start|>system\nYou are a helpful assistant.",
+    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
+    version="qwen_2",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.MPT,
+    sep="<|im_end|>\n"
+)
+
 conv_gemma_instruct = Conversation(system="", roles=("<start_of_turn>user\n", "<start_of_turn>model\n"), version="gemma", messages=[], offset=0, sep_style=SeparatorStyle.GEMMA, sep="<end_of_turn>\n")
 
 conv_llava_plain = Conversation(
@@ -551,7 +561,8 @@ Answer the questions.""",
     sep="<|im_end|>",
 )
 
-default_conversation = conv_vicuna_v0
+# default_conversation = conv_vicuna_v0
+default_conversation = conv_qwen_2
 conv_templates = {
     "default": conv_vicuna_v0,
     "v0": conv_vicuna_v0,
@@ -576,7 +587,7 @@ conv_templates = {
     "llava_mistral_instruct": conv_mistral_instruct,
     "mpt": conv_mpt,
     "qwen_1_5": conv_qwen,
-    "qwen_2": conv_qwen,
+    "qwen_2": conv_qwen_2,
     "gemma_instruct": conv_gemma_instruct,
 }
 

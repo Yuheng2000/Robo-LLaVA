@@ -21,7 +21,7 @@ from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
 from transformers.models.clip.modeling_clip import CLIPEncoderLayer
 
 import llava.benchmark.data as bmk
-from llava.model import LlavaQwen2ForCausalLM
+from llava.model import LlavaQwenForCausalLM
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.train.train import update_data_args
 
@@ -39,7 +39,7 @@ class EvaluationArguments:
 
 def load_llava_model_for_inference(model_dir, device_map):
     tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=False)
-    model = LlavaQwen2ForCausalLM.from_pretrained(
+    model = LlavaQwenForCausalLM.from_pretrained(
         model_dir,
         low_cpu_mem_usage=True,
         device_map=device_map,
@@ -70,7 +70,9 @@ def run(dataloader: DataLoader, model: torch.nn.Module):
         batch = bmk.prepare_inputs(batch, dtype=model.module.config.torch_dtype, device=rank)
         batch_indices = batch.pop('indices')
         with torch.no_grad():
-            outputs = model.forward(**batch, return_dict=True)
+            # outputs = model.forward(**batch, return_dict=True)
+            outputs = model.forward(**batch, return_dict=True, use_cache=False)
+            # print(outputs)
             for label in outputs['labels']:
                 assert label.max() >= 0, f"The label maybe truncated: {label.shape} vs. {model.module.config.tokenizer_model_max_length}"
             gt = torch.eq(outputs['labels'].unsqueeze(-1), opt_ids)
@@ -138,15 +140,21 @@ def main(rank, world_size, eval_args: EvaluationArguments, data_args: bmk.Benchm
     torch.manual_seed(0)
 
     model, tokenizer = load_llava_model_for_inference(eval_args.model_dir, device_map=f'cuda:{rank}')
-
+    
+    tokenizer.padding_side = 'left'
+    
     data_args = update_data_args(data_args, model)
-    if data_args.image_prefix == 'origin':
-        data_args.image_prefix = 'index'
+
+
+    # if data_args.image_prefix == 'origin':
+    #     data_args.image_prefix = 'index'
+
 
     model = wrap_fsdp(model)
 
     for bmk_name in eval_args.benchmarks:
         dataloader = load_benchmark(rank, bmk_name, data_args, tokenizer)
+
         results = run(dataloader, model)
         if results is None:
             if rank == 0:

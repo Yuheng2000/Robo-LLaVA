@@ -21,10 +21,11 @@ from dataclasses import dataclass, field
 import json
 import logging
 import pathlib
-from typing import Dict, Optional, Sequence, List
+from typing import Dict, Optional, Sequence, List, Union
 from PIL import Image, ImageFile
 from packaging import version
 import numpy as np
+from io import BytesIO
 
 import time
 import random
@@ -57,6 +58,18 @@ local_rank = None
 
 IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= version.parse("0.14")
 
+def expand2square(pil_img, background_color):
+    width, height = pil_img.size
+    if width == height:
+        return pil_img
+    elif width > height:
+        result = Image.new(pil_img.mode, (width, width), background_color)
+        result.paste(pil_img, (0, (width - height) // 2))
+        return result
+    else:
+        result = Image.new(pil_img.mode, (height, height), background_color)
+        result.paste(pil_img, ((height - width) // 2, 0))
+        return result
 
 @dataclass
 class ModelArguments:
@@ -189,7 +202,7 @@ class TrainingArguments(transformers.TrainingArguments):
 
 def update_data_args(data_args, model):
     vision_tower = model.get_vision_tower()
-    data_args.def_conv_ver = model.config.def_conv_ver
+    # data_args.def_conv_ver = model.config.def_conv_ver
     if vision_tower is not None:
         data_args.image_processor = vision_tower.image_processor
         for key in vars(data_args):
@@ -845,8 +858,94 @@ def preprocess_v1(sources, tokenizer: transformers.PreTrainedTokenizer, has_imag
     )
 
 
-def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False) -> Dict:
-    conv = conversation_lib.default_conversation.copy()
+# def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False) -> Dict:
+#     conv = conversation_lib.default_conversation.copy()
+#     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
+
+#     # Apply prompt templates
+#     conversations = []
+#     for i, source in enumerate(sources):
+#         if roles[source[0]["from"]] != conv.roles[0]:
+#             # Skip the first one if it is not from human
+#             source = source[1:]
+
+#         conv.messages = []
+#         for j, sentence in enumerate(source):
+#             role = roles[sentence["from"]]
+#             assert role == conv.roles[j % 2], f"{i}"
+#             conv.append_message(role, sentence["value"])
+#         conversations.append(conv.get_prompt())
+
+#     # Tokenize conversations
+
+#     if has_image:
+#         input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
+#     else:
+#         input_ids = tokenizer(
+#             conversations,
+#             return_tensors="pt",
+#             padding="longest",
+#             max_length=tokenizer.model_max_length,
+#             truncation=True,
+#         ).input_ids
+
+#     targets = input_ids.clone()
+#     assert conv.sep_style == conversation_lib.SeparatorStyle.MPT
+
+#     # Mask targets
+#     sep = conv.sep + conv.roles[1]
+#     for conversation, target in zip(conversations, targets):
+#         total_len = int(target.ne(tokenizer.pad_token_id).sum())
+
+#         rounds = conversation.split(conv.sep)
+#         re_rounds = [conv.sep.join(rounds[:3])]  # system + user + gpt
+#         for conv_idx in range(3, len(rounds), 2):
+#             re_rounds.append(conv.sep.join(rounds[conv_idx : conv_idx + 2]))  # user + gpt
+#         cur_len = 1
+#         target[:cur_len] = IGNORE_INDEX
+#         for i, rou in enumerate(re_rounds):
+#             if rou == "":
+#                 break
+
+#             parts = rou.split(sep)
+#             if len(parts) != 2:
+#                 break
+#             parts[0] += sep
+
+#             if has_image:
+#                 round_len = len(tokenizer_image_token(rou, tokenizer))
+#                 instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - 1
+#             else:
+#                 round_len = len(tokenizer(rou).input_ids)
+#                 instruction_len = len(tokenizer(parts[0]).input_ids) - 1
+
+#             if i != 0 and getattr(tokenizer, "legacy", False) and IS_TOKENIZER_GREATER_THAN_0_14:
+#                 round_len += 1
+#                 instruction_len += 1
+
+#             target[cur_len : cur_len + instruction_len] = IGNORE_INDEX
+
+#             cur_len += round_len
+#         target[cur_len:] = IGNORE_INDEX
+
+#         if cur_len < tokenizer.model_max_length:
+#             if cur_len != total_len:
+#                 target[:] = IGNORE_INDEX
+#                 print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}." f"(#turns={len(re_rounds)} ignored)")
+
+#     return dict(
+#         input_ids=input_ids,
+#         labels=targets,
+#     )
+
+def preprocess_mpt(
+    sources,
+    tokenizer: transformers.PreTrainedTokenizer,
+    has_image: bool = False,
+    conv: conversation_lib.Conversation = None
+) -> Dict:
+    if conv is None:
+        conv = conversation_lib.default_conversation.copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -866,7 +965,7 @@ def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_ima
     # Tokenize conversations
 
     if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
+        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
     else:
         input_ids = tokenizer(
             conversations,
@@ -881,14 +980,16 @@ def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_ima
 
     # Mask targets
     sep = conv.sep + conv.roles[1]
+    sep_token_len = len(tokenizer(conv.sep).input_ids)
+    sep_tail_space = int(sep[-1] == ' ')
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
         rounds = conversation.split(conv.sep)
-        re_rounds = [conv.sep.join(rounds[:3])]  # system + user + gpt
+        re_rounds = [conv.sep.join(rounds[:3])] # system + user + gpt
         for conv_idx in range(3, len(rounds), 2):
-            re_rounds.append(conv.sep.join(rounds[conv_idx : conv_idx + 2]))  # user + gpt
-        cur_len = 1
+            re_rounds.append(conv.sep.join(rounds[conv_idx:conv_idx+2]))    # user + gpt
+        cur_len = 0
         target[:cur_len] = IGNORE_INDEX
         for i, rou in enumerate(re_rounds):
             if rou == "":
@@ -901,30 +1002,29 @@ def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_ima
 
             if has_image:
                 round_len = len(tokenizer_image_token(rou, tokenizer))
-                instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - 1
+                instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - sep_tail_space
             else:
                 round_len = len(tokenizer(rou).input_ids)
-                instruction_len = len(tokenizer(parts[0]).input_ids) - 1
-
-            if i != 0 and getattr(tokenizer, "legacy", False) and IS_TOKENIZER_GREATER_THAN_0_14:
-                round_len += 1
-                instruction_len += 1
-
+                instruction_len = len(tokenizer(parts[0]).input_ids) - sep_tail_space
             target[cur_len : cur_len + instruction_len] = IGNORE_INDEX
 
+            if IS_TOKENIZER_GREATER_THAN_0_14:
+                round_len += sep_token_len
+                instruction_len += sep_token_len
             cur_len += round_len
         target[cur_len:] = IGNORE_INDEX
 
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}." f"(#turns={len(re_rounds)} ignored)")
+                print(
+                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored) \n{sources}"
+                )
 
     return dict(
         input_ids=input_ids,
         labels=targets,
     )
-
 
 def preprocess_plain(
     sources: Sequence[str],
@@ -1145,6 +1245,178 @@ class LazySupervisedDataset(Dataset):
             image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
         return image, image_size, "image"
 
+    def _load_image(self, image_file: Union[bytes, str]) -> Image.Image:
+        if isinstance(image_file, bytes):
+            return Image.open(BytesIO(image_file)).convert('RGB')
+        elif isinstance(image_file, str):
+            image_folder = self.data_args.image_folder
+            return Image.open(os.path.join(image_folder, image_file)).convert('RGB')
+
+
+    def _prepare_image(self, image_file, image_aspect_ratio):
+        processor = self.data_args.image_processor
+        image = self._load_image(image_file)
+        assert image.mode == "RGB", "The image is not a three-channel RGB image"
+        if image_aspect_ratio == 'pad':
+            image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+            assert isinstance(image, Image.Image), f"Wrong image type: {type(image)}"
+            image = processor.preprocess(image, return_tensors='pt')['pixel_values']
+            pboxes = torch.Tensor([[0., 0., 1., 1.]]) # only one patch
+        elif image_aspect_ratio == "anyres" or image_aspect_ratio == "anyres_mul":
+            sbr_coeff = None
+            # if self.data_args.random_sbr_coeffs:
+            #     cp = [0] + sorted(torch.rand(3, dtype=torch.float32).tolist()) + [1]
+            #     sbr_coeff = tuple([cp[i] - cp[i-1] for i in range(1, len(cp))])
+            # image, pboxes = process_anyres_image(image,
+            #     processor, self.data_args.image_grid_pinpoints, sbr_coeff)
+            # print(processor, type(processor))
+            # import pdb
+            # pdb.set_trace()
+            image, pboxes = process_anyres_image(image,
+                processor, self.data_args.image_grid_pinpoints)
+        else:
+            raise ValueError(f"Unsupported image aspect ratio: {image_aspect_ratio}")
+
+        # image: torch.Tensor([P, 3, W, H])
+        assert isinstance(image, torch.Tensor), f"Wrong image type: {type(image)}"
+        assert image.ndim == 4 and image.shape[1] == 3, f"Wrong image shape: {image.shape}"
+
+        # pboxes: torch.Tensor([P, 4])
+        assert pboxes.shape[0] == image.shape[0] and pboxes.shape[1] == 4, f"Wrong pboxes shape: {pboxes.shape}"
+
+        return image, pboxes
+
+    def _item_from_source(self, source: Dict) -> Dict[str, torch.Tensor]:
+        ## Prepare images
+        proc_mode = self.data_args.image_aspect_ratio
+        images_with_mode = []
+        if 'images' in source:
+            if proc_mode == 'anyres' and len(source['images']) != 1:
+                proc_mode = 'pad'
+            for image_file in source['images']:
+                images_with_mode.append((image_file, proc_mode))
+        elif 'image' in source:
+            images_with_mode.append((source['image'], proc_mode))
+
+        all_pboxes = [] # for each image in this sample
+        for i_img, (image_file, proc_mode) in enumerate(images_with_mode):
+            images_with_mode[i_img], pboxes = self._prepare_image(image_file, proc_mode)
+            all_pboxes.append(pboxes) # pboxes: torch.Tensor([P, 4])
+
+        ## Prepare text
+        conversations = copy.deepcopy(source["conversations"])
+        self.data_args.repad_bbox = False
+        # Replace the bbox tags in the conversation with the coordinates in input space
+        if len(images_with_mode) > 0 and self.data_args.repad_bbox:
+            # The bbox sub-string must follow the format "[L, T, B, R]" or "[IMG][L, T, B, R]".
+            # Here, IMG is the image index of a sample, and L, T, B, R are the normalized coordinates
+            #   of the bounding box. In single image sample, IMG can be omitted (default is 0).
+            # Note: If the `pad` mode is enabled, the bounding box coordinates must be
+            #   pre-converted to the coordinate system of the padded square image!
+            if getattr(self, 'bbox_pattern', None) is None:
+                self.bbox_pattern = re.compile(r'(?:\[([0-9]+)+\])?(\[(?:[01]\.[0-9]+, ){3}[01]\.[0-9]+\])')
+
+            for i_msg, msg in enumerate(conversations):
+                matched_replacers = []
+                for match in self.bbox_pattern.finditer(msg['value']):
+                    try:
+                        assert len(match.groups()) == 2 # verify the pattern
+                        i_img = int(match.group(1)) if match.group(1) is not None else 0
+                        assert match.group(2) is not None # bbox must exist
+                        bbox = ast.literal_eval(match.group(2))
+                        assert len(bbox) == 4, f"Wrong bbox length: {len(bbox)}"
+                        assert all([isinstance(x, float) for x in bbox]), f"Wrong bbox type: {bbox}"
+                    except Exception as e:
+                        print(f"[SRC{source['id']}][MSG{i_msg}] {msg['value']} {e}")
+                        continue
+
+                    if all([x <= 1.0 for x in bbox]):
+                        assert i_img < len(all_pboxes), f"Wrong image index: {i_img} (id={source['id']})"
+                        pbox0 = all_pboxes[i_img][0].view(2, 2) # 0: main-patch in anyres mode or the only patch in pad mode
+                        bbox = torch.Tensor(bbox).view(2, 2) * (pbox0[1] - pbox0[0]) + pbox0[0]
+                        coords = [round(x, 2) for x in bbox.flatten().tolist()]
+                        matched_replacers.append((match.span(), str(coords)))
+
+                for span, replacer in reversed(matched_replacers):
+                    msg['value'] = msg['value'][:span[0]] + replacer + msg['value'][span[1]:]
+
+        self.data_args.image_prefix = 'origin'
+        if self.data_args.image_prefix != 'origin' and len(images_with_mode) > 0:
+            conversations = self.remove_image_tags(conversations, num_imgs=len(images_with_mode))
+            for i_msg, msg in enumerate(conversations):
+                assert msg['value'].count('<image>') == 0, f"{source['id']} {msg['value']}"
+
+            def get_grid_size(i_img):
+                pboxes = all_pboxes[i_img]
+                if pboxes.shape[0] == 1:
+                    return (1, 1)
+                else:
+                    assert pboxes.shape[0] > 1, f"{pboxes.shape[0]}"
+                    x_begs, y_begs = set(), set()
+                    for i_patch in range(1, pboxes.shape[0]):
+                        x_begs.add(pboxes[i_patch][0].item())
+                        y_begs.add(pboxes[i_patch][1].item())
+                    return (len(x_begs), len(y_begs))
+
+            if self.data_args.image_prefix == 'naked':
+                img_tag = "<image>" * len(images_with_mode)
+            elif self.data_args.image_prefix == 'naked_line':
+                img_tag = "<image>" * len(images_with_mode) + "\n"
+            elif self.data_args.image_prefix == 'naked_lines':
+                img_tag = "<image>\n" * len(images_with_mode)
+            elif self.data_args.image_prefix == 'patch':
+                img_tag = "<image>\n" * len(images_with_mode)
+            elif self.data_args.image_prefix.startswith("index"):
+                img_tag = ""
+                for i_img in range(len(images_with_mode)):
+                    img_tag += f"Image {i_img + 1}:\n"
+                    if self.data_args.image_prefix == 'index_grid':
+                        grid_size = get_grid_size(i_img)
+                        img_tag += f"<|{grid_size[0]},{grid_size[1]}|>"
+                    img_tag += "<image>\n"
+            else:
+                raise ValueError(f"Unsupported image prefix mode: {self.data_args.image_prefix}")
+            conversations[0]['value'] = img_tag + conversations[0]['value']
+
+            num_img_tags = 0
+            for i_msg, msg in enumerate(conversations):
+                num_img_tags += msg['value'].count('<image>')
+            assert num_img_tags == len(images_with_mode), f"{source['id']} {msg['value']}"
+
+        data_dict = self.text_processor([conversations], self.tokenizer, len(images_with_mode) > 0)
+        data_dict = dict(input_ids=data_dict['input_ids'][0], labels=data_dict['labels'][0], id=source['id'])
+
+        if 'image' in source:
+            assert len(images_with_mode) == 1, f"Wrong number of images: {len(images_with_mode)} (id={source['id']})"
+            data_dict['images'] = images_with_mode
+        elif 'images' in source:
+            assert len(images_with_mode) >= 1, f"Wrong number of images: {len(images_with_mode)} (id={source['id']})"
+            data_dict['images'] = images_with_mode
+        else:
+            # image does not exist in the data, but the model is multimodal
+            crop_size = self.data_args.image_processor.crop_size
+            data_dict['images'] = [torch.zeros(1, 3, crop_size['height'], crop_size['width'])]
+            assert all_pboxes == []
+            all_pboxes = [torch.Tensor([[0., 0., 1., 1.]])]
+
+        if self.data_args.image_prefix == 'patch':
+            data_dict['patch_prefixes'] = []
+            assert len(all_pboxes) == len(data_dict['images']), \
+                f"{len(all_pboxes)} != {len(data_dict['images'])}"
+            for i_img, pboxes in enumerate(all_pboxes):
+                patch_prefixes_strs = []
+                for pbox in pboxes:
+                    assert pbox.shape == (4,), f"{pbox.shape}"
+                    vals = [f"{x:.2f}" for x in pbox.tolist()]
+                    assert i_img < 9, f"{i_img}"
+                    patch_prefixes_strs.append(f"[Patch [{', '.join(vals)}] of image {i_img + 1}]")
+                prefix_tokens = self.tokenizer(patch_prefixes_strs, return_tensors='pt')['input_ids']
+                assert prefix_tokens.shape[1] == 31, f"{patch_prefixes_strs}\n{prefix_tokens.shape}"
+                data_dict['patch_prefixes'].append(prefix_tokens)
+            assert i_img == len(data_dict['images']) - 1, f"{i_img} != {len(data_dict['images']) - 1}"
+
+        return data_dict
+
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         # TODO: define number of retries somewhere else
         num_base_retries = 3
@@ -1214,7 +1486,7 @@ class LazySupervisedDataset(Dataset):
                 print("File {} not exist!".format(video_file))
 
             try:
-                if "shareVideoGPTV" in video_file or ("M4-Instruct-Videos" in video_file and suffix not in ['mp4',]):
+                if "shareVideoGPTV" in video_file or ("jiyuheng" in video_file and suffix not in ['mp4',]):
                     frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
                     frame_files.sort()  # Ensure the frames are sorted if they are named sequentially
 
